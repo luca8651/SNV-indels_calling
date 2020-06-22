@@ -1,0 +1,322 @@
+import yaml
+import os
+import glob
+from itertools import product
+
+path_normal="/icgc/dkfzlsdf/analysis/B210/Luca/016975/"
+path="/icgc/dkfzlsdf/analysis/B210/Luca/016975/"
+outdir2="/icgc/dkfzlsdf/analysis/B210/Luca/016975/"
+outdir="/icgc/dkfzlsdf/analysis/B210/Luca/016975/"
+#genome="/icgc/dkfzlsdf/analysis/B210/references_genome/Mus_musculus.GRCm38.dna_rm.toplevel_short_IDs.fa"
+#gendict="/icgc/dkfzlsdf/analysis/B210/references_genome/Mus_musculus.GRCm38.dna_rm.toplevel_short_IDs.dict"
+genome="/icgc/dkfzlsdf/analysis/B210/references_genome/Heterocephalus_glaber_female.HetGla_female_1.0.dna_rm.toplevel_short_ids.fa"
+gendict="/icgc/dkfzlsdf/analysis/B210/references_genome/Heterocephalus_glaber_female.HetGla_female_1.0.dna_rm.toplevel_short_ids.dict"
+
+
+name_normal="/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417"
+name1_normal=expand("/icgc/dkfzlsdf/analysis/B210/Luca/016975/{ID}",ID=glob_wildcards("/icgc/dkfzlsdf/analysis/B210/Luca/016975/{id}_combined_liver_R1.fastq").id)
+name1 = expand("/icgc/dkfzlsdf/analysis/B210/Luca/016975/{ID}",ID=glob_wildcards("/icgc/dkfzlsdf/analysis/B210/Luca/016975/{id}_combined_tumor_R1.fastq").id )
+name2= expand("{ID}", ID=glob_wildcards("/icgc/dkfzlsdf/analysis/B210/Luca/016975/{id}_combined_tumor_R1.fastq").id)
+chrname2 =expand("{chr}", chr=glob_wildcards("/icgc/dkfzlsdf/analysis/B210/Luca/016975/{chr}.bed").chr )
+
+
+rule all:
+	input:	
+		expand("{gen}.bwt",gen=genome),
+		expand("{name}_combined_tumor_R{number}_val_{number}.fq",name=name1,number=["1","2"]),
+		expand("{name}_combined_tumor.bam",name=name1),
+		expand("{name}_combined_tumor_sort.bam",name=name1),
+		expand("{name}_combined_tumor_no_dupl_sort.bam",name=name1),
+		expand("{name}_combined_tumor_no_dupl_sort_RG_LB.bam",name=name1),
+              	expand("{gen}.bwt",gen=genome),
+		expand("{name}_combined_liver_R{number}_val_{number}.fq",name=name1_normal,number=["1","2"]),
+		"/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_sort.bam",
+		"/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_no_dupl_sort.bam",
+		"/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_no_dupl_sort_RG_LB.bam.bai",
+		"/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_no_dupl_sort_RG_LB.bam",
+		expand("{name}/Manta/results/variants/candidateSmallIndels.vcf.gz",name=name1),
+		expand("{name}/Strelka/results/variants/somatic.indels.vcf.gz",name=name1),
+		expand("{name}/Mutect2/{Chrname}_Mutect2_output_filtered.vcf.gz.tbi",name=name1,Chrname=chrname2),
+		expand("{name}/Mutect2/{Chrname}_Mutect2_output.vcf",name=name1,Chrname=chrname2),
+		expand("{name}/Mutect2/{Chrname}_Mutect2_output_filtered.vcf",name=name1,Chrname=chrname2),
+		expand("{name}/Mutect2_output_filtered_sort.vcf",name=name1),
+		expand("{name}/Somaticseq/Consensus.sSNV.vcf",name=name1),
+		expand("{name}/Somaticseq/Consensus.sINDEL.vcf",name=name1)
+
+
+ruleorder:   bwa_genome_index  > samtools_index  > Manta > Strelka > Mutect2 > index_vcf > merge_vcf > sort_vcf > somaticseq_call
+
+
+rule gatk_dict:
+	input:
+		expand("{gen}",gen=genome)
+	output:
+		expand("{Gendict}",Gendict=gendict)
+	shell:
+		"module load gatk/4.0.9.0 ; cd /icgc/dkfzlsdf/analysis/B210/references_genome ; gatk CreateSequenceDictionary  -R {input}"
+
+
+rule samtools_genome_index:
+	input:
+		expand("{gen}",gen=genome)
+	output:
+		expand("{gen}.fai",gen=genome)
+	shell:
+		"module load samtools/1.6 ; samtools faidx {input}"
+
+rule bwa_genome_index:
+	input:
+		expand("{gen}",gen=genome)
+	output:
+		expand("{gen}.bwt",gen=genome)
+	shell:
+		"module load bwa  ; bwa index {input}"
+
+rule trim_galore:
+	input:
+		r1="{name1}_combined_tumor_R1.fastq",
+		r2="{name1}_combined_tumor_R2.fastq"
+
+	output:
+		expand("{{name1}}_combined_tumor_R{number}_val_{number}.fq",number=["1","2"])
+	shell:
+		"module load trim-galore/0.5.0 ; module load pypy/2.7-6.0.0 ; trim_galore  --output_dir {outdir2}  --paired {input.r1} {input.r2}  "  
+
+rule bwa_mem:
+	input:
+		R1="{name1}_combined_tumor_R1_val_1.fq",
+		R2="{name1}_combined_tumor_R2_val_2.fq",
+		Genome=expand("{gen}",gen=genome)
+	output:
+		"{name1}_combined_tumor.bam"
+	shell:
+		"module load samtools/default ;\
+		module load bwa  ; \
+		cd {path} ; bwa mem -t {threads} {input.Genome} {input.R1} {input.R2} | samtools view -h -b  > {output} "
+
+rule samtools_sort:
+	input:
+		"{name1}_combined_tumor.bam"
+	output:
+		"{name1}_combined_tumor_sort.bam"
+	shell:
+		"module load samtools/default ; cd {path} ; samtools sort  -O BAM {input} > {output} "
+
+
+rule remove_duplicates:
+	input:
+		"{name1}_combined_tumor_sort.bam"
+	output:
+		outbam="{name1}_combined_tumor_no_dupl_sort.bam",
+		metrics="{name1}_combined_tumor_dupl_metrics.txt"
+	shell:
+		"module load gatk/4.0.9.0 ; cd  {path} ; gatk MarkDuplicates -I {input}  -O {output.outbam} -M {output.metrics}  --REMOVE_DUPLICATES=true --TMP_DIR {path_normal}"
+
+
+rule trim_galore_normal:
+	input:
+		r1="/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_R1.fastq",
+		r2="/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_R2.fastq"
+	output:
+		expand("/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_R{number}_val_{number}.fq",number=["1","2"])
+	shell:
+		"module load trim-galore/0.5.0 ; module load pypy/2.7-6.0.0 ; trim_galore  --output_dir {outdir}  --paired {input.r1} {input.r2}  "
+
+
+rule bwa_mem_normal:
+	input:
+		R1="/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_R1_val_1.fq",
+		R2="/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_R2_val_2.fq",
+		Genome=expand("{gen}",gen=genome)
+	output:
+		"/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver.bam"
+	threads: 8
+	shell:
+		"module load samtools/default ;\
+		module load bwa  ; \
+		cd {path_normal} ; bwa mem -t {threads} {input.Genome} {input.R1} {input.R2} | samtools view -h -b  > {output} "
+
+
+rule samtools_sort_normal:
+	input:
+		"/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver.bam"
+	output:
+		"/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_sort.bam"
+	shell:
+		"module load samtools/default ; cd {path_normal} ; samtools sort  -O BAM {input} > {output} "
+
+
+rule remove_duplicates_normal:
+	input:
+		"/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_sort.bam"
+	output:
+		outbam="/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_no_dupl_sort.bam",
+		metrics="/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_dupl_metrics.txt"
+	shell:
+		"module load gatk/4.0.9.0 ; cd  {path_normal} ; gatk MarkDuplicates  -I {input}  -O {output.outbam} -M {output.metrics}  --REMOVE_DUPLICATES=true  --TMP_DIR={path_normal} "
+
+
+rule add_readgroup:
+	input:
+		"{name1}_combined_tumor_no_dupl_sort.bam"      
+	output:
+		"{name1}_combined_tumor_no_dupl_sort_RG_LB.bam"      
+	shell:
+		'module load gatk/4.0.9.0 ; i=$( echo {input} | sed \"s/AS/%AS/\" |  cut -f 2 -d \"%\" | cut -f 1 -d \"_\"  )  ; \
+		run=$( grep $i  {outdir}snakedata.tsv | cut -f 2 | sort | uniq   ) ; \
+		sample=$( grep $i  {outdir}snakedata.tsv | cut -f 3 | sort | uniq   ) ; \
+		biomat=$( grep $i  {outdir}snakedata.tsv | cut -f 8 | sort | uniq   ) ;	\
+		platform=$( grep $i  {outdir}snakedata.tsv | cut -f 5 | sort | uniq   ) ; \
+		fastq_id=$( grep $i  {outdir}snakedata.tsv | cut -f 1 | sort | uniq | tr \"\\n\" \"_\"  | rev  | sed \"s/_//\" | rev  ) ; \
+		barcode=$( echo $sample  | cut -f 3 -d \":\"   ) ; \
+		project=$( grep $i  {outdir}snakedata.tsv | cut -f 7 | sort | uniq   ) ; \
+		patient=$(  grep $i  {outdir}snakedata.tsv | cut -f 9 | sort | uniq  ) ; \
+		id=$( echo $run\"_\"$fastq_id  ) ; \
+		sm=$( echo $sample\"_\"$project  ) ; \
+		lb=$( echo $biomat\"_\"$patient ) ; \
+		gatk AddOrReplaceReadGroups  -ID $id  -PL $platform -LB  $id   -PU $barcode  -SM TUMOR  -I  {input} \
+		-O  {output} '
+
+
+rule add_readgroup_normal:
+	input:
+		"/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_no_dupl_sort.bam"    
+	output:
+		"/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_no_dupl_sort_RG_LB.bam"      
+	shell:
+		'module load gatk/4.0.9.0 ; module load samtools ; i=$( echo {input} | sed \"s/AS/%AS/\" |  cut -f 2 -d \"%\" | cut -f 1 -d \"_\"  )  ; \
+		ilse=$( grep $i  {outdir}snakedata.tsv | cut -f 6 | sort | uniq   ) ; \
+		run=$( grep $i  {outdir}snakedata.tsv | cut -f 2 | sort | uniq   ) ; \
+		sample=$( grep $i  {outdir}snakedata.tsv | cut -f 3 | sort | uniq   ) ; \
+		biomat=$( grep $i  {outdir}snakedata.tsv | cut -f 8 | sort | uniq   ) ;	\
+		platform=$( grep $i  {outdir}snakedata.tsv | cut -f 5 | sort | uniq   ) ; \
+		fastq_id=$( grep $i  {outdir}snakedata.tsv | cut -f 1 | sort | uniq |  tr \"\\n\" \"_\"  rev  | sed \"s/_//\" | rev  ) ; \
+		barcode=$( echo $sample | cut -f 3 -d \":\"  ) ; \
+		project=$( grep $i  {outdir}snakedata.tsv | cut -f 7 | sort | uniq   ) ; \
+		patient=$(  grep $i  {outdir}snakedata.tsv | cut -f 9 | sort | uniq  ) ; \
+		id=$( echo $run\"_\"$fastq_id  ) ; \
+		sm=$( echo $sample\"_\"$project  ) ; \
+		lb=$( echo $biomat\"_\"$patient ) ; \
+		gatk AddOrReplaceReadGroups  -ID $id  -PL $platform -LB  $id   -PU $barcode  -SM NORMAL  -I  {input} \
+		-O  {output} '
+
+rule samtools_index:
+	input:
+		"{name1}_combined_tumor_no_dupl_sort_RG_LB.bam"
+	output:
+		"{name1}_combined_tumor_no_dupl_sort_RG_LB.bam.bai"
+	shell:
+		"module load samtools/default ; samtools index  {input} "
+
+rule samtools_index_normal:
+	input:
+		"/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_no_dupl_sort_RG_LB.bam"
+	output:
+		"/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_no_dupl_sort_RG_LB.bam.bai"
+	shell:
+		"module load samtools/default ; samtools index  {input} "
+
+
+rule Manta:
+	input:
+		tumor="{name1}_combined_tumor_no_dupl_sort_RG_LB.bam",
+		normal="/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_no_dupl_sort_RG_LB.bam",
+		ind2="/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_no_dupl_sort_RG_LB.bam.bai",
+		ind1="{name1}_combined_tumor_no_dupl_sort_RG_LB.bam.bai",
+		Outdir="{name1}/Manta"
+	output:
+		"{name1}/Manta/results/variants/candidateSmallIndels.vcf.gz"
+	shell:
+		" module load manta/1.2.2 ; cd {input.Outdir} ;  /tbi/software/x86_64/manta/manta-1.2.2/el7/bin/configManta.py  --normalBam {input.normal}  --tumorBam {input.tumor}  --referenceFasta  {genome} --runDir  {input.Outdir} ; python ./runWorkflow.py -m local -j 8 > manta.log "
+
+
+
+rule Strelka:
+	input:
+		indels="{name1}/Manta/results/variants/candidateSmallIndels.vcf.gz",
+		tumor="{name1}_combined_tumor_no_dupl_sort_RG_LB.bam",
+		normal="/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_no_dupl_sort_RG_LB.bam",
+		ind1="{name1}_combined_tumor_no_dupl_sort_RG_LB.bam.bai",
+		ind2="/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_no_dupl_sort_RG_LB.bam.bai",
+		path="{name1}/Strelka/"
+	output:
+		"{name1}/Strelka/results/variants/somatic.snvs.vcf.gz",
+		"{name1}/Strelka/results/variants/somatic.indels.vcf.gz"
+	shell:
+		" module load strelka/2.8.4 ;  /tbi/software/x86_64/strelka/strelka-2.8.4/el7/bin/configureStrelkaSomaticWorkflow.py --normalBam {input.normal}   --tumorBam   {input.tumor}  \
+		--indelCandidates  {input.indels} \
+		--referenceFasta  {genome}   --runDir {input.path} ; {input.path}runWorkflow.py -m local -j 8 "
+
+rule Mutect2:
+	input:
+		tumor="{name1}_combined_tumor_no_dupl_sort_RG_LB.bam",
+		normal="/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_no_dupl_sort_RG_LB.bam",
+		ind2="/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_no_dupl_sort_RG_LB.bam.bai",
+		ind1="{name1}_combined_tumor_no_dupl_sort_RG_LB.bam.bai",
+		dict=gendict,
+		chrfile=expand("{out}{{chrname2}}.bed",out=outdir),
+		path="{name1}/Mutect2"
+	output:
+		"{name1}/Mutect2/{chrname2}_Mutect2_output.vcf"
+	shell:
+		" module load gatk/4.0.9.0 ; module load samtools ;  cd {input.path}/ ; gatk Mutect2 -L {input.chrfile}  -R  {genome}  -I {input.tumor}  -I {input.normal} -tumor TUMOR -normal NORMAL  -O {output} "
+
+rule filter_vcf:
+	input:
+		"{name1}/Mutect2/{chrname2}_Mutect2_output.vcf"
+	output:
+		"{name1}/Mutect2/{chrname2}_Mutect2_output_filtered.vcf"
+	shell:
+		" module load gatk/4.0.9.0 ; cd {outdir}/ ; gatk  FilterMutectCalls -V {input} -O {output} "
+
+rule index_vcf:
+	input:
+		"{name1}/Mutect2/{chrname2}_Mutect2_output_filtered.vcf"
+	output:
+		gz="{name1}/Mutect2/{chrname2}_Mutect2_output_filtered.vcf.gz",
+		tbi="{name1}/Mutect2/{chrname2}_Mutect2_output_filtered.vcf.gz.tbi"
+	shell:
+		"cd  {outdir} ; export PERL5LIB=/tbi/software/x86_64/vcftools/vcftools-0.1.12b/el7/lib/perl5/site_perl/   ;\
+		export PATH=${{PATH}}:/home/l136n/tabix-0.2.6 ;\
+		bgzip -c  {input}  > {output.gz} ;\
+		tabix -p vcf {output.gz}  "
+
+rule merge_vcf:
+	input:
+		vcf=expand("{{name1}}/Mutect2/{Chrname}_Mutect2_output_filtered.vcf.gz",Chrname=chrname2),
+		path="{name1}/Mutect2"
+	output:
+		"{name1}/Mutect2_output_filtered.vcf"  
+	shell:
+		" module load vcftools/default ; export PERL5LIB=/tbi/software/x86_64/vcftools/vcftools-0.1.12b/el7/lib/perl5/site_perl/   ;\
+		export PATH=${{PATH}}:/home/l136n/tabix-0.2.6 ;  cd {input.path}/ ;  vcf-merge {input.vcf} > merged.vcf ; \
+		vcf-sort -c merged.vcf  > {output} ; rm merged.vcf " 
+
+rule sort_vcf:
+	input:
+		vcf="{name1}/Mutect2_output_filtered.vcf",
+		dict=gendict,
+		path="{name1}"
+	output:
+		"{name1}/Mutect2_output_filtered_sort.vcf"
+	shell:
+		" cd {input.path} ;  module load gatk/4.0.9.0 ;  gatk SortVcf --SEQUENCE_DICTIONARY={input.dict}  --INPUT={input.vcf} --OUTPUT={output} "
+	
+rule somaticseq_call:
+	input:
+		mutect2="{name1}/Mutect2_output_filtered_sort.vcf",
+		tumor="{name1}_combined_tumor_no_dupl_sort_RG_LB.bam",
+		normal="/icgc/dkfzlsdf/analysis/B210/Luca/016975/AS-422417_combined_liver_no_dupl_sort_RG_LB.bam",
+		strelka_snvs="{name1}/Strelka/results/variants/somatic.snvs.vcf.gz",
+                strelka_indels="{name1}/Strelka/results/variants/somatic.indels.vcf.gz",
+		path="{name1}/Somaticseq"
+	output:
+		"{name1}/Somaticseq/Consensus.sSNV.vcf",
+		"{name1}/Somaticseq/Consensus.sINDEL.vcf"
+
+	shell:
+		"module load python/3.6.1 ; module load  bedtools/default ; module load  R/default  ;\
+		/home/l136n/somaticseq/somaticseq/run_somaticseq.py --keep-intermediates  --output-directory {input.path}   --genome-reference {genome}  \
+		 paired --normal-bam {input.normal} --tumor-bam  {input.tumor}   \
+		--strelka-snv  {input.strelka_snvs}  \
+		--strelka-indel  {input.strelka_indels} --mutect2-vcf {input.mutect2}  "
