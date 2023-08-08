@@ -7,8 +7,7 @@ path_normal="/icgc/dkfzlsdf/analysis/B210/Luca/016975/"
 path="/icgc/dkfzlsdf/analysis/B210/Luca/016975/"
 outdir2="/icgc/dkfzlsdf/analysis/B210/Luca/016975/"
 outdir="/icgc/dkfzlsdf/analysis/B210/Luca/016975/"
-#genome="/icgc/dkfzlsdf/analysis/B210/references_genome/Mus_musculus.GRCm38.dna_rm.toplevel_short_IDs.fa"
-#gendict="/icgc/dkfzlsdf/analysis/B210/references_genome/Mus_musculus.GRCm38.dna_rm.toplevel_short_IDs.dict"
+
 genome="/icgc/dkfzlsdf/analysis/B210/references_genome/Heterocephalus_glaber_female.HetGla_female_1.0.dna_rm.toplevel_short_ids.fa"
 gendict="/icgc/dkfzlsdf/analysis/B210/references_genome/Heterocephalus_glaber_female.HetGla_female_1.0.dna_rm.toplevel_short_ids.dict"
 
